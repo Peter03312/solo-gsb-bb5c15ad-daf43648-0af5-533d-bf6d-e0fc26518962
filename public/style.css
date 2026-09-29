@@ -498,6 +498,82 @@ input[type="number"] { width: 70px; }
   font-size: 13.5px;
 }
 
+/* ================= 巡演备货 ================= */
+.stocking-section { margin-top: 14px; }
+.col-stock-name { width: 160px; }
+.col-stock-price { width: 110px; }
+.stock-pkg-name { width: 100%; }
+.stock-pkg-price { width: 90px; }
+.stock-pkg-props { width: 100%; }
+.stock-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.stock-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 3px 12px 3px 8px;
+  cursor: pointer;
+  font-size: 13.5px;
+}
+.stock-check input { margin: 0; }
+.stock-prop { border-radius: 12px; padding: 0 6px; }
+.stock-ready { color: var(--ok); }
+.stock-missing { color: #ffd27a; font-weight: bold; }
+
+.stock-result { margin-top: 14px; display: flex; flex-direction: column; gap: 10px; }
+.stock-empty-ok {
+  background: var(--card-2);
+  border: 1px solid var(--ok);
+  border-radius: 8px;
+  padding: 12px 14px;
+  color: var(--ok);
+  font-weight: bold;
+}
+.stock-missing-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.stock-cover-chip {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  padding: 3px 10px;
+  font-size: 13.5px;
+}
+.stock-cover-chip em { color: var(--muted); font-style: normal; margin-left: 6px; font-size: 12.5px; }
+.stock-pkg {
+  position: relative;
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent-2);
+  border-radius: 8px;
+  padding: 10px 14px 10px 42px;
+}
+.stock-pkg-idx {
+  position: absolute;
+  left: 12px;
+  top: 10px;
+  width: 22px;
+  height: 22px;
+  line-height: 22px;
+  text-align: center;
+  border-radius: 50%;
+  background: var(--accent-2);
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: bold;
+}
+.stock-pkg .stock-pkg-name { font-weight: bold; font-size: 15px; }
+.stock-pkg .stock-pkg-price { color: var(--accent); font-weight: bold; margin-left: 10px; }
+.stock-pkg-items { display: flex; flex-wrap: wrap; gap: 2px; margin-top: 6px; align-items: center; }
+.pack-item-chip.stock-already { opacity: 0.62; text-decoration: line-through; }
+
+
 /* ================= 换景人员排班 ================= */
 .schedule-panel {
   border: 1px dashed var(--accent-2);
