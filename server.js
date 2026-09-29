@@ -5,6 +5,7 @@ const express = require('express');
 const { solve, replan, MAX_SCENES, MAX_ALTERNATIVES, normalizeProps } = require('./solver');
 const { packItems, validatePacking } = require('./packing');
 const { validateSchedule, scheduleSteps } = require('./scheduling');
+const { validateStocking, solveStocking } = require('./stocking');
 const store = require('./store');
 
 const app = express();
@@ -236,6 +237,45 @@ function sanitizePackingState(raw) {
   return { capacity, weights, pairs };
 }
 
+/**
+ * 校验方案保存载荷里附带的备货配置（可选；只做结构规范化，不对照场景道具，
+ * 不合法的细节直接丢弃，不阻断保存）。保存形如
+ * { prepared: [道具名], packages: [{ name, price, props }] }。
+ */
+function sanitizeStockingState(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const prepared = [];
+  if (Array.isArray(raw.prepared)) {
+    const seen = new Set();
+    for (const p of raw.prepared) {
+      const name = String(p).trim();
+      if (name && !seen.has(name)) { seen.add(name); prepared.push(name); }
+    }
+  }
+  const packages = [];
+  if (Array.isArray(raw.packages)) {
+    const nameSeen = new Set();
+    for (const pkg of raw.packages.slice(0, 30)) {
+      if (!pkg || typeof pkg !== 'object') continue;
+      const name = String(pkg.name).trim();
+      const price = Number(pkg.price);
+      if (!name || nameSeen.has(name) || !Number.isInteger(price) || price <= 0) continue;
+      nameSeen.add(name);
+      const props = [];
+      if (Array.isArray(pkg.props)) {
+        const pSeen = new Set();
+        for (const p0 of pkg.props) {
+          const p = String(p0).trim();
+          if (p && !pSeen.has(p)) { pSeen.add(p); props.push(p); }
+        }
+      }
+      if (!props.length) continue;
+      packages.push({ name, price, props });
+    }
+  }
+  return { prepared, packages };
+}
+
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 
 app.post('/api/solve', (req, res) => {
@@ -268,6 +308,15 @@ app.post('/api/schedule', (req, res) => {
   res.json(scheduleSteps(pendingSteps, workers, durations));
 });
 
+/** 巡演备货：以场景道具全集为需求清单，标记已备齐道具，求覆盖全部缺件的最低总价采购包组合 */
+app.post('/api/stock', (req, res) => {
+  const { errors, required, prepared, missing, packages } = validateStocking(req.body);
+  if (errors.length) return res.status(400).json({ ok: false, errors });
+  const result = solveStocking(required, prepared, missing, packages);
+  if (!result.ok) return res.status(400).json({ ok: false, errors: result.errors });
+  res.json(result);
+});
+
 app.get('/api/plans', (req, res) => {
   res.json({ plans: store.list() });
 });
@@ -279,7 +328,8 @@ app.post('/api/plans', (req, res) => {
   if (errors.length) return res.status(400).json({ ok: false, errors });
   const replanState = sanitizeReplanState(req.body && req.body.replanState, new Set(scenes.map(s => s.id)));
   const packing = sanitizePackingState(req.body && req.body.packing);
-  const plan = store.create({ name, mode, timeLimit, opLimit, scenes, constraints, replanState, packing });
+  const stocking = sanitizeStockingState(req.body && req.body.stocking);
+  const plan = store.create({ name, mode, timeLimit, opLimit, scenes, constraints, replanState, packing, stocking });
   res.status(201).json({ ok: true, plan });
 });
 
@@ -296,7 +346,8 @@ app.put('/api/plans/:id', (req, res) => {
   if (errors.length) return res.status(400).json({ ok: false, errors });
   const replanState = sanitizeReplanState(req.body && req.body.replanState, new Set(scenes.map(s => s.id)));
   const packing = sanitizePackingState(req.body && req.body.packing);
-  const plan = store.update(req.params.id, { name, mode, timeLimit, opLimit, scenes, constraints, replanState, packing });
+  const stocking = sanitizeStockingState(req.body && req.body.stocking);
+  const plan = store.update(req.params.id, { name, mode, timeLimit, opLimit, scenes, constraints, replanState, packing, stocking });
   if (!plan) return res.status(404).json({ ok: false, errors: ['方案不存在'] });
   res.json({ ok: true, plan });
 });

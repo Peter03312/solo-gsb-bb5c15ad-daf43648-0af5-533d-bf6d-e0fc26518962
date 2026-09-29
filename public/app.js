@@ -3,6 +3,8 @@
 /* ================= 状态 ================= */
 const MAX_SCENES = 12;
 const MAX_PACK_ITEMS = 14;
+const MAX_STOCK_MISSING = 14; // 缺件（需求清单中未备齐的道具）种类上限
+const MAX_STOCK_PACKAGES = 30; // 采购包数量上限
 const MAX_SCHED_TASKS = 14; // 每阶段（撤下/摆上）最多 14 项搬运任务
 const MIN_CREW = 2;
 const MAX_CREW = 4;
@@ -21,6 +23,7 @@ const state = {
   replan: null, // 演出中重排会话：{ prefixIds, chainStartOrder, kDraft, stageProps }
   savedReplan: null, // 随方案保存的重排状态（载入后用于自动恢复）
   packing: null, // 巡演装箱配置：{ capacity, weights: { 道具名: 重量 }, pairs: [{ a, b }] }
+  stocking: null, // 巡演备货配置：{ prepared: string[], packages: [{ id, name, price, propsText }] }
   crew: null, // 换景人员排班配置：{ workers: string[], durations: { 道具名: 分钟 } }
   schedule: null, // 最近一次排班结果（仅当其 scheduleKey 与当前待执行步骤一致时有效）
 };
@@ -79,6 +82,7 @@ function renderScenes() {
     propsInput.addEventListener('input', () => {
       s.props = propsInput.value.split(/[,，]/).map(x => x.trim()).filter(Boolean);
       renderPacking(); // 道具变化同步到装箱清单（不重建本输入框，不打断输入）
+      renderStocking(); // 同步到备货需求清单（同样不重建场景输入框）
     });
     tdProps.appendChild(propsInput);
 
@@ -274,6 +278,7 @@ function renderAll() {
   renderScenes();
   renderConstraintForms();
   renderPacking();
+  renderStocking();
 }
 
 /* ================= 巡演装箱 ================= */
@@ -507,6 +512,263 @@ function renderPackingResult(data) {
 function weightOf(data, name) {
   const it = (data.items || []).find(x => x.name === name);
   return it ? it.weight : '';
+}
+
+/* ================= 巡演备货 ================= */
+let lastStockingReqKey = null; // 最近一次成功计算所依据的需求清单 + 备货配置指纹
+
+function defaultStocking() {
+  return { prepared: [], packages: [] };
+}
+
+/** 逗号分隔的道具字符串 → 去空白、去重后的数组。 */
+function parsePropList(text) {
+  const seen = new Set();
+  const out = [];
+  for (const p of String(text || '').split(/[,，]/)) {
+    const name = p.trim();
+    if (name && !seen.has(name)) { seen.add(name); out.push(name); }
+  }
+  return out;
+}
+
+/** 按当前需求清单校对备货配置：备齐标记只保留清单内道具；保留全部采购包（外来道具在包行内提示）。 */
+function reconcileStocking(required) {
+  if (!state.stocking) state.stocking = defaultStocking();
+  const set = new Set(required);
+  state.stocking.prepared = state.stocking.prepared.filter(p => set.has(p));
+  for (const pkg of state.stocking.packages) {
+    if (!Array.isArray(pkg.propsText) && typeof pkg.propsText !== 'string') pkg.propsText = '';
+  }
+}
+
+function clearStockingResult() {
+  state.stockResult = null;
+  const box = $('#stocking-result');
+  if (box) box.innerHTML = '';
+}
+
+/** 备货配置指纹：需求清单 / 备齐标记 / 任一采购包（名称、价格、道具）变化都会令旧结果作废。 */
+function stockingReqKey(required) {
+  return JSON.stringify({
+    required,
+    prepared: state.stocking.prepared,
+    packages: state.stocking.packages.map(p => [p.name, p.price, parsePropList(p.propsText)]),
+  });
+}
+
+function renderStocking() {
+  const required = collectPackingItems(); // 与装箱共用同一汇总口径
+  reconcileStocking(required);
+
+  // 需求清单 / 备货标记 / 报价变化后清除旧结果
+  const key = stockingReqKey(required);
+  if (key !== lastStockingReqKey) {
+    lastStockingReqKey = key;
+    clearStockingResult();
+  }
+
+  const missing = required.filter(p => !state.stocking.prepared.includes(p));
+  const over = missing.length > MAX_STOCK_MISSING;
+
+  $('#stocking-count').textContent = required.length
+    ? `需求道具 ${required.length} 种（由各场景道具汇总去重生成），已备齐 ${state.stocking.prepared.length} 种，缺件 ${missing.length} / ${MAX_STOCK_MISSING} 种`
+    : '当前场景还没有任何道具，请先在第 1 节录入场景与道具';
+  $('#stocking-count').classList.toggle('hint-over', over);
+
+  // 需求清单勾选行
+  const reqBox = $('#stock-required');
+  reqBox.innerHTML = '';
+  if (!required.length) {
+    reqBox.appendChild(Object.assign(document.createElement('span'), {
+      className: 'hint',
+      textContent: '需求清单为空，暂无可标记的道具。',
+    }));
+  }
+  required.forEach((name) => {
+    const label = document.createElement('label');
+    label.className = 'stock-prop-check' + (state.stocking.prepared.includes(name) ? ' is-prepared' : ' is-missing');
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = state.stocking.prepared.includes(name);
+    box.addEventListener('change', () => {
+      const set = new Set(state.stocking.prepared);
+      if (box.checked) set.add(name); else set.delete(name);
+      state.stocking.prepared = required.filter(p => set.has(p));
+      renderStocking();
+    });
+    const txt = document.createElement('span');
+    txt.textContent = name;
+    label.append(box, txt);
+    reqBox.appendChild(label);
+  });
+  if (over) {
+    const warn = document.createElement('div');
+    warn.className = 'stock-warn';
+    warn.textContent = `⚠ 缺件 ${missing.length} 种，超过 ${MAX_STOCK_MISSING} 种上限，无法计算采购方案，请先备齐部分道具或减少道具种类。`;
+    reqBox.appendChild(warn);
+  }
+
+  // 采购包表
+  const tbody = $('#stocking-tbody');
+  tbody.innerHTML = '';
+  state.stocking.packages.forEach((pkg, i) => {
+    const tr = document.createElement('tr');
+
+    const tdIdx = document.createElement('td');
+    tdIdx.textContent = i + 1;
+
+    const tdName = document.createElement('td');
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.className = 'stock-pkg-name';
+    nameInput.value = pkg.name;
+    nameInput.placeholder = `采购包 ${i + 1}`;
+    nameInput.addEventListener('input', () => { pkg.name = nameInput.value; clearStockingResult(); });
+    tdName.appendChild(nameInput);
+
+    const tdPrice = document.createElement('td');
+    const priceInput = document.createElement('input');
+    priceInput.type = 'number';
+    priceInput.className = 'stock-pkg-price';
+    priceInput.min = '1';
+    priceInput.step = '1';
+    priceInput.value = pkg.price;
+    priceInput.placeholder = '正整数';
+    priceInput.addEventListener('input', () => {
+      pkg.price = Math.max(0, Math.floor(Number(priceInput.value) || 0));
+      clearStockingResult();
+    });
+    tdPrice.appendChild(priceInput);
+
+    const tdProps = document.createElement('td');
+    const propsInput = document.createElement('input');
+    propsInput.type = 'text';
+    propsInput.className = 'stock-pkg-props';
+    propsInput.value = Array.isArray(pkg.propsText) ? pkg.propsText.join(', ') : pkg.propsText;
+    propsInput.placeholder = '逗号分隔，如：灯笼, 地毯';
+    propsInput.addEventListener('input', () => {
+      pkg.propsText = propsInput.value;
+      clearStockingResult();
+      // 外来道具就地标红（不重建输入框）
+      const names = parsePropList(propsInput.value);
+      tdProps.classList.toggle('stock-invalid-prop', names.some(n => !new Set(required).has(n)));
+    });
+    const names = parsePropList(propsInput.value);
+    if (names.some(n => !new Set(required).has(n))) tdProps.classList.add('stock-invalid-prop');
+    tdProps.appendChild(propsInput);
+
+    const tdOp = document.createElement('td');
+    const del = document.createElement('button');
+    del.className = 'btn btn-sm btn-danger';
+    del.textContent = '删除';
+    del.addEventListener('click', () => {
+      state.stocking.packages.splice(i, 1);
+      renderStocking();
+    });
+    tdOp.appendChild(del);
+
+    tr.append(tdIdx, tdName, tdPrice, tdProps, tdOp);
+    tbody.appendChild(tr);
+  });
+
+  const pkgCount = state.stocking.packages.length;
+  $('#btn-add-package').disabled = pkgCount >= MAX_STOCK_PACKAGES || !required.length;
+  $('#btn-stock').disabled = !required.length || over;
+}
+
+function stockingPayload() {
+  return {
+    scenes: payload().scenes,
+    prepared: state.stocking.prepared.slice(),
+    packages: state.stocking.packages.map(p => ({
+      name: String(p.name || ''),
+      price: p.price,
+      props: parsePropList(p.propsText),
+    })),
+  };
+}
+
+async function doStock() {
+  const data = await api('/api/stock', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(stockingPayload()),
+  });
+  if (data.ok) {
+    const required = collectPackingItems();
+    lastStockingReqKey = stockingReqKey(required); // 记录本次结果对应的输入
+    state.stockResult = data;
+  }
+  renderStockingResult(data);
+}
+
+function renderStockingResult(data) {
+  const box = $('#stocking-result');
+  box.innerHTML = '';
+  if (data.errors) { box.appendChild(errorBlock(data.errors)); return; }
+  if (!data.ok) {
+    box.appendChild(errorBlock(data.errors && data.errors.length ? data.errors : ['备货计算失败，请检查采购包配置']));
+    return;
+  }
+
+  const wrap = document.createElement('div');
+  wrap.className = 'stock-result';
+
+  // 缺件清单
+  const missLine = document.createElement('div');
+  missLine.className = 'stock-missing-line';
+  if (!data.missing.length) {
+    missLine.innerHTML = '<span class="stock-all-ready">✅ 需求清单中的道具已全部备齐，无需采购。</span>';
+  } else {
+    const head = document.createElement('span');
+    head.className = 'stock-missing-label';
+    head.textContent = `缺件（${data.missing.length} 种）：`;
+    missLine.appendChild(head);
+    data.missing.forEach((name, i) => {
+      if (i > 0) missLine.appendChild(Object.assign(document.createElement('span'), { className: 'hint', textContent: '、' }));
+      const chip = document.createElement('span');
+      chip.className = 'stock-item-chip stock-missing-chip';
+      chip.textContent = name;
+      missLine.appendChild(chip);
+    });
+  }
+  wrap.appendChild(missLine);
+
+  // 总价汇总
+  const summary = document.createElement('div');
+  summary.className = 'timed-summary';
+  summary.innerHTML =
+    `<span>采购包：<strong>${data.packageCount}</strong> 个</span>`
+    + `<span>最低总价：<strong>${data.totalPrice}</strong></span>`
+    + (data.missing.length ? '<span class="hint">同价时优先包数少，再按录入顺序选取</span>' : '<span class="hint">空组合，总价 0</span>');
+  wrap.appendChild(summary);
+
+  // 所选采购包（按录入顺序）
+  if (data.selected.length) {
+    const list = document.createElement('div');
+    list.className = 'stock-pkg-list';
+    data.selected.forEach((pkg) => {
+      const card = document.createElement('div');
+      card.className = 'stock-pkg-card';
+      const head = document.createElement('div');
+      head.className = 'stock-pkg-head';
+      head.innerHTML =
+        `<span class="stock-pkg-title">#${pkg.index} ${escapeHtml(pkg.name)}</span>`
+        + `<span class="stock-pkg-price">价格 <strong>${pkg.price}</strong></span>`
+        + `<span class="hint">覆盖缺件：${pkg.coversMissing.length ? pkg.coversMissing.map(escapeHtml).join('、') : '无（仅重复覆盖 / 含已备齐道具）'}</span>`;
+      card.appendChild(head);
+      const all = document.createElement('div');
+      all.className = 'hint stock-pkg-props-line';
+      all.textContent = `包含道具：${pkg.props.join('、')}`;
+      card.appendChild(all);
+      list.appendChild(card);
+    });
+    wrap.appendChild(list);
+  }
+
+  box.appendChild(wrap);
+  box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 /* ================= 求解 ================= */
@@ -1636,6 +1898,17 @@ async function savePlan() {
         pairs: state.packing.pairs.map(x => ({ ...x })),
       }
     : null;
+  // 备货配置（备齐标记 + 采购包）随方案一起持久化；报价改变后旧结果不保存、需重新计算
+  p.stocking = state.stocking
+    ? {
+        prepared: state.stocking.prepared.slice(),
+        packages: state.stocking.packages.map(x => ({
+          name: String(x.name || ''),
+          price: Number.isInteger(x.price) && x.price > 0 ? x.price : 0,
+          props: parsePropList(x.propsText),
+        })),
+      }
+    : null;
   const body = JSON.stringify({ name, ...p });
   const headers = { 'Content-Type': 'application/json' };
   const data = state.planId
@@ -1657,6 +1930,9 @@ async function loadPlan() {
   $('#result-card').hidden = true;
   clearPackingResult();
   lastPackingItemsKey = null;
+  clearStockingResult();
+  lastStockingReqKey = null;
+  state.stockResult = null;
   state.live = null;
   state.replan = null;
   state.crew = null; // 载入方案后排班需按新节目单重新填写工时
@@ -1769,6 +2045,24 @@ function hydrateFromPlan(p) {
       ? pk.pairs.filter(x => x && typeof x === 'object').map(x => ({ a: String(x.a), b: String(x.b) }))
       : [],
   };
+  // 旧方案没有 stocking 字段：按空白备货配置处理（无备齐标记、无采购包）
+  const st = p.stocking && typeof p.stocking === 'object' ? p.stocking : null;
+  state.stocking = {
+    prepared: st && Array.isArray(st.prepared)
+      ? st.prepared.map(x => String(x)).filter(Boolean)
+      : [],
+    packages: st && Array.isArray(st.packages)
+      ? st.packages
+        .filter(x => x && typeof x === 'object')
+        .slice(0, MAX_STOCK_PACKAGES)
+        .map(x => ({
+          id: uid(),
+          name: String(x.name || ''),
+          price: Number.isInteger(Number(x.price)) && Number(x.price) > 0 ? Number(x.price) : 0,
+          propsText: Array.isArray(x.props) ? x.props.map(String).join(', ') : String(x.propsText || ''),
+        }))
+      : [],
+  };
   $('#time-limit').value = state.timeLimit;
   applyMode(state.mode);
 }
@@ -1794,6 +2088,9 @@ function newPlan() {
   state.replan = null;
   state.savedReplan = null;
   state.packing = defaultPacking();
+  state.stocking = defaultStocking();
+  state.stockResult = null;
+  lastStockingReqKey = null;
   state.crew = null;
   state.schedule = null;
   $('#plan-name').value = '';
@@ -1801,6 +2098,7 @@ function newPlan() {
   applyMode('classic');
   $('#result-card').hidden = true;
   clearPackingResult();
+  clearStockingResult();
   showStatus('已新建空白方案');
 }
 
@@ -1936,6 +2234,23 @@ $('#btn-add-packpair').addEventListener('click', () => {
   state.packing.pairs.push({ a, b });
   clearPackingResult();
   renderPacking();
+});
+
+/* ================= 巡演备货事件 ================= */
+$('#btn-add-package').addEventListener('click', () => {
+  if (state.stocking.packages.length >= MAX_STOCK_PACKAGES) return;
+  state.stocking.packages.push({ id: uid(), name: '', price: 1, propsText: '' });
+  renderStocking();
+  // 聚焦新包名称输入框
+  const rows = $('#stocking-tbody').querySelectorAll('tr');
+  const last = rows[rows.length - 1];
+  if (last) last.querySelector('.stock-pkg-name').focus();
+});
+$('#btn-stock').addEventListener('click', doStock);
+$('#btn-sync-stocking').addEventListener('click', () => {
+  renderStocking();
+  const n = collectPackingItems().length;
+  showStatus(n ? `备货需求清单已同步：共 ${n} 种道具` : '备货需求清单已同步：当前还没有任何道具');
 });
 
 /* ================= 初始化 ================= */

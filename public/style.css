@@ -591,3 +591,71 @@ input[type="number"] { width: 70px; }
   font-size: 12.5px;
 }
 .sched-task em { color: var(--muted); font-style: normal; font-size: 11.5px; margin-left: 3px; }
+
+/* ================= 巡演备货 ================= */
+.stock-required {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0 14px;
+}
+.stock-prop-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 2px 11px;
+  font-size: 13px;
+  cursor: pointer;
+  background: var(--card-2);
+}
+.stock-prop-check.is-missing { border-color: #d98a88; }
+.stock-prop-check.is-prepared { opacity: 0.72; }
+.stock-prop-check input { width: 15px; height: 15px; }
+.stock-item-chip {
+  border-radius: 12px;
+  padding: 1px 10px;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+.stock-missing-chip {
+  background: rgba(217,138,136,0.16);
+  border: 1px solid #d98a88;
+}
+.stock-warn {
+  flex-basis: 100%;
+  color: #ff9d9a;
+  font-weight: bold;
+  font-size: 13.5px;
+  margin-top: 4px;
+}
+.col-stock-name { width: 160px; }
+.col-stock-price { width: 110px; }
+.stock-pkg-name { width: 100%; }
+.stock-pkg-price { width: 80px; }
+.stock-pkg-props { width: 100%; }
+.stock-invalid-prop input,
+td.stock-invalid-prop { color: #ff9d9a; }
+.stock-result { margin-top: 14px; display: flex; flex-direction: column; gap: 10px; }
+.stock-missing-line { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; }
+.stock-missing-label { font-weight: bold; margin-right: 4px; }
+.stock-all-ready { color: var(--ok); font-weight: bold; }
+.stock-pkg-list { display: flex; flex-direction: column; gap: 8px; }
+.stock-pkg-card {
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  padding: 7px 12px;
+}
+.stock-pkg-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 14px;
+}
+.stock-pkg-title { font-weight: bold; }
+.stock-pkg-price strong { color: var(--accent); font-size: 16px; }
+.stock-pkg-props-line { margin-top: 3px; }
